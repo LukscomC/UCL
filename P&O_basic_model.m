@@ -1,5 +1,6 @@
 % =========================================================
-% MPPT P&O - COMPARACAO ENTRADA x SAIDA
+% MPPT P&O COMPLETO
+% Comparacao Entrada x Saida + Oscilacao no MPP
 % Resposta ao Degrau de Irradiancia
 % =========================================================
 
@@ -11,24 +12,41 @@ close all;
 % DADOS DO PAINEL SOLAR
 % =========================================================
 
-Vmp_nominal = 41.7;      % Tensao nominal no MPP (V)
-Imp_nominal = 13.2;      % Corrente nominal no MPP (A)
+Voc = 50;                 % Tensao circuito aberto
+Isc = 14;                 % Corrente curto-circuito
+
+Vmp_nominal = 41.7;       % Tensao no MPP
+Imp_nominal = 13.2;       % Corrente no MPP
 
 % =========================================================
 % PARAMETROS DA SIMULACAO
 % =========================================================
 
-N = 200;
+N = 300;
 tempo = 1:N;
 
-% Vetores
-V_in  = zeros(1,N);      % Tensao do painel
-P_in  = zeros(1,N);      % Potencia do painel
+% =========================================================
+% VETORES
+% =========================================================
 
-V_out = zeros(1,N);      % Tensao controlada pelo MPPT
-P_out = zeros(1,N);      % Potencia apos MPPT
+V_in   = zeros(1,N);      % Tensao do painel
+I_in   = zeros(1,N);      % Corrente do painel
+P_in   = zeros(1,N);      % Potencia do painel
+
+V_out  = zeros(1,N);      % Tensao saida boost
+P_out  = zeros(1,N);      % Potencia saida boost
 
 duty_array = zeros(1,N);
+
+% Vetores da trajetoria P&O
+V_track = zeros(1,N);
+P_track = zeros(1,N);
+
+% =========================================================
+% TENSAO INICIAL
+% =========================================================
+
+Vpv = 25;
 
 % =========================================================
 % SIMULACAO
@@ -39,44 +57,39 @@ for k = 1:N
     % -----------------------------------------------------
     % DEGRAU DE IRRADIANCIA
     % -----------------------------------------------------
-    %
-    % Simula mudanca brusca de irradiacao solar
-    %
 
-    if k < 100
+    if k < 150
         G = 0.7;
     else
         G = 1.0;
     end
 
     % -----------------------------------------------------
-    % ENTRADA DO PAINEL SOLAR
+    % MODELO SIMPLIFICADO PAINEL FV
     % -----------------------------------------------------
+    %
+    % Curva I-V aproximada
+    %
 
-    Vpv = Vmp_nominal * G;
-    Ipv = Imp_nominal * G;
+    Ipv = (Isc * G) * (1 - (Vpv/(Voc*G))^2);
 
+    % Evita corrente negativa
+    Ipv = max(Ipv,0);
+
+    % Potencia entrada
     Pin = Vpv * Ipv;
 
     % -----------------------------------------------------
     % MPPT P&O
     % -----------------------------------------------------
 
-    duty = mppt_po(Vpv, Ipv);
+    [duty, Vnext] = mppt_po(Vpv, Pin);
 
     % -----------------------------------------------------
-    % MODELO SIMPLIFICADO DO CONVERSOR BOOST
+    % CONVERSOR BOOST
     % -----------------------------------------------------
-    %
-    % Vout = Vin / (1-D)
-    %
 
     Vboost = Vpv / (1 - duty);
-
-    % Potencia de saida aproximada
-    %
-    % Considerando eficiencia simplificada
-    %
 
     eficiencia = 0.95;
 
@@ -86,124 +99,196 @@ for k = 1:N
     % ARMAZENAMENTO
     % -----------------------------------------------------
 
-    V_in(k)  = Vpv;
-    P_in(k)  = Pin;
+    V_in(k) = Vpv;
+    I_in(k) = Ipv;
+    P_in(k) = Pin;
 
     V_out(k) = Vboost;
     P_out(k) = Pboost;
 
     duty_array(k) = duty;
 
+    % Trajetoria do P&O
+    V_track(k) = Vpv;
+    P_track(k) = Pin;
+
+    % Atualiza tensao
+    Vpv = Vnext;
+
 end
 
 % =========================================================
-% GRAFICO - TENSAO ENTRADA x SAIDA
+% CURVA P-V COMPLETA
+% =========================================================
+
+Vcurve = linspace(0,Voc,500);
+
+Icurve = Isc * (1 - (Vcurve/Voc).^2);
+
+Pcurve = Vcurve .* Icurve;
+
+% =========================================================
+% GRAFICO 1
+% TENSAO ENTRADA x SAIDA
 % =========================================================
 
 figure;
 
-plot(tempo, V_in,  'LineWidth',2);
+plot(tempo, V_in,'LineWidth',2);
 hold on;
-plot(tempo, V_out, 'LineWidth',2);
+plot(tempo, V_out,'LineWidth',2);
 
 grid on;
 
-title('Tensao - Entrada do Painel x Saida MPPT');
+title('Tensao - Entrada x Saida MPPT');
 xlabel('Iteracoes');
 ylabel('Tensao (V)');
 
-legend('Entrada Painel','Saida MPPT');
+legend('Entrada Painel','Saida Boost');
 
 % =========================================================
-% GRAFICO - POTENCIA ENTRADA x SAIDA
+% GRAFICO 2
+% POTENCIA ENTRADA x SAIDA
 % =========================================================
 
 figure;
 
-plot(tempo, P_in,  'LineWidth',2);
+plot(tempo, P_in,'LineWidth',2);
 hold on;
-plot(tempo, P_out, 'LineWidth',2);
+plot(tempo, P_out,'LineWidth',2);
 
 grid on;
 
-title('Potencia - Entrada do Painel x Saida MPPT');
+title('Potencia - Entrada x Saida MPPT');
 xlabel('Iteracoes');
 ylabel('Potencia (W)');
 
-legend('Potencia Painel','Potencia Saida MPPT');
+legend('Potencia Painel','Potencia Saida');
 
 % =========================================================
-% GRAFICO - DUTY CYCLE
+% GRAFICO 3
+% DUTY CYCLE
 % =========================================================
 
 figure;
 
-plot(tempo, duty_array, 'LineWidth',2);
+plot(tempo,duty_array,'LineWidth',2);
 
 grid on;
 
-title('Controle Duty Cycle - MPPT P&O');
+title('Controle Duty Cycle - P&O');
 xlabel('Iteracoes');
 ylabel('Duty Cycle');
+
+% =========================================================
+% GRAFICO 4
+% OSCILACAO AO REDOR DO MPP
+% =========================================================
+
+figure;
+
+plot(Vcurve,Pcurve,'LineWidth',2);
+
+hold on;
+
+plot(V_track,P_track,'o-','LineWidth',1.5);
+
+grid on;
+
+title('Oscilacao do Metodo P&O em torno do MPP');
+
+xlabel('Tensao do Painel (V)');
+ylabel('Potencia do Painel (W)');
+
+legend('Curva P-V','Trajetoria do P&O');
+
+% =========================================================
+% GRAFICO 5
+% POTENCIA AO LONGO DO TEMPO
+% =========================================================
+
+figure;
+
+plot(P_track,'LineWidth',2);
+
+grid on;
+
+title('Oscilacao da Potencia no MPPT');
+
+xlabel('Iteracoes');
+ylabel('Potencia (W)');
 
 % =========================================================
 % FUNCAO MPPT P&O
 % =========================================================
 
-function duty = mppt_po(Vpv, Ipv)
+function [duty, Vnext] = mppt_po(Vpv,Ppv)
 
-    persistent V_old P_old duty_old
+    persistent V_old P_old duty_old direction
 
     % Inicializacao
     if isempty(V_old)
 
-        V_old = 0;
-        P_old = 0;
+        V_old = Vpv;
+        P_old = Ppv;
+
         duty_old = 0.50;
 
+        direction = 1;
+
     end
 
     % -----------------------------------------------------
-    % Potencia atual
-    % -----------------------------------------------------
-
-    P = Vpv * Ipv;
-
     % Variacoes
-    dV = Vpv - V_old;
-    dP = P - P_old;
+    % -----------------------------------------------------
 
-    % Passo de perturbacao
-    step = 0.005;
+    dP = Ppv - P_old;
+
+    % Passo perturbacao
+    stepV = 0.3;
+
+    stepDuty = 0.005;
 
     % =====================================================
-    % ALGORITMO PERTURBA E OBSERVA
+    % LOGICA P&O
     % =====================================================
 
-    if dP > 0
+    if dP < 0
 
-        if dV > 0
-            duty = duty_old - step;
-        else
-            duty = duty_old + step;
-        end
-
-    else
-
-        if dV > 0
-            duty = duty_old + step;
-        else
-            duty = duty_old - step;
-        end
+        % Inverte direcao
+        direction = -direction;
 
     end
 
-    % Saturacao
+    % -----------------------------------------------------
+    % Nova tensao perturbada
+    % -----------------------------------------------------
+
+    Vnext = Vpv + direction*stepV;
+
+    % Saturacao tensao
+    Vnext = max(min(Vnext,48),5);
+
+    % -----------------------------------------------------
+    % Ajuste duty cycle
+    % -----------------------------------------------------
+
+    if direction > 0
+        duty = duty_old + stepDuty;
+    else
+        duty = duty_old - stepDuty;
+    end
+
+    % Saturacao duty
     duty = max(min(duty,0.95),0.05);
 
+    % -----------------------------------------------------
     % Atualizacao
+    % -----------------------------------------------------
+
     V_old = Vpv;
-    P_old = P;
+    P_old = Ppv;
+
     duty_old = duty;
 
 end
